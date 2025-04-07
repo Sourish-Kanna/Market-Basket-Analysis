@@ -1,12 +1,16 @@
-def get_product_suggestions(product, rules, top_n=5):
+def get_product_suggestions(product, rules):
     suggestions = []
-    seen = set()
     for rule in rules:
         if product in rule['antecedent']:
-            for item in rule['consequent']:
-                if item not in seen:
-                    suggestions.append((item, rule['confidence']))
-                    seen.add(item)
-    # Sort suggestions by confidence
-    suggestions.sort(key=lambda x: x[1], reverse=True)
-    return suggestions[:top_n]
+            for consequent in rule['consequent']:
+                suggestions.append((consequent, rule['confidence']))
+    # Sort by confidence
+    suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)
+
+    seen = set()
+    result = []
+    for item, _ in suggestions:
+        if item not in seen:
+            result.append(item)
+            seen.add(item)
+    return result
