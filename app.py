@@ -1,42 +1,75 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from apriori import load_transactions, get_frequent_itemsets, generate_rules
-from chatbot import get_product_suggestions
+from chatbot import get_product_suggestions, best_match
 
 @st.cache_data
 def load_data():
     transactions = load_transactions("data/transactions.csv")
     frequent_itemsets, total = get_frequent_itemsets(transactions, min_support=0.01)
     rules = generate_rules(frequent_itemsets, total, min_confidence=0.5)
-    return rules
+    product_set = {item for rule in rules for item in rule['antecedent'].union(rule['consequent'])}
+    return rules, list(product_set)
 
-# Title
+# Load data
+rules, products = load_data()
+
+# Page UI
 st.title("🛒 Smart Market Basket Chatbot")
-st.markdown("Ask me about a product (e.g., `bread`, `tea`, `juice`) and I’ll suggest related items based on shopping patterns.")
+st.markdown("Ask me something like `I need tea`, `Do you have bread?`, or `I want juice`. I'll suggest related products.")
 
-rules = load_data()
+# Chat history state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-# Store chat history
-if "chat" not in st.session_state:
-    st.session_state.chat = []
+# Reset chat
+if st.button("🔄 Reset Chat"):
+    st.session_state.chat_history = []
+    st.rerun()
 
-# Input box
-user_input = st.text_input("Type a product name...", key="input")
+# Input form
+with st.form(key="chat_form", clear_on_submit=True):
+    user_input = st.text_input("Type something like 'I need tea'...", key="input")
+    submitted = st.form_submit_button("Send")
 
-# Process input
-if user_input:
-    suggestions = get_product_suggestions(user_input.strip().lower(), rules)
-    if suggestions:
-        top_suggestions = suggestions[:5]
-        response = f"People who bought **{user_input}** also often bought: {', '.join(top_suggestions)}."
+# JavaScript to refocus on text input after submission
+components.html("""
+<script>
+    const input = window.parent.document.querySelector('input[type="text"]');
+    if (input) {
+        input.focus();
+    }
+</script>
+""", height=0)
+
+# Handle user input
+if submitted and user_input:
+    user_input_clean = user_input.strip().lower()
+
+    # Handle greetings and exit
+    if any(greet in user_input_clean for greet in ["hi", "hello", "help"]):
+        bot_response = "Hey there! 👋 Ask me about a product and I’ll recommend related ones."
+    elif "bye" in user_input_clean:
+        bot_response = "Goodbye! 👋 Come back anytime."
     else:
-        response = f"🤔 Sorry, I couldn't find any frequent products related to **{user_input}**. Try something like 'bread', 'milk', or 'coffee'."
+        # Product match
+        product, score = best_match(user_input_clean, products)
+        if score >= 0.5:
+            suggestions = get_product_suggestions(product, rules)
+            if suggestions:
+                bot_response = f"People who bought **{product}** also bought: {', '.join(suggestions[:5])}."
+            else:
+                bot_response = f"Hmm... I couldn’t find related items for **{product}**."
+        else:
+            bot_response = "I didn’t get that. Try something like `I need tea`, `I want bread`, or `Do you have juice?`"
 
-    # Save to chat history as a pair (user, bot)
-    st.session_state.chat.insert(0, (user_input, response))
+    # Save chat
+    # st.session_state.chat_history.append(("🧑 You", user_input))
+    # st.session_state.chat_history.append(("🤖 Bot", bot_response))
+    st.session_state.chat_history.append((user_input, bot_response))
 
 
-# Display chat history (most recent on top, user first then bot)
-for user_msg, bot_msg in st.session_state.chat:
-    st.markdown(f"**🧑 You:**  {user_msg}")
-    st.markdown(f"**🤖 Bot:**  {bot_msg}")
-
+# Display chat history (newest first)
+for user_input, bot_response in reversed(st.session_state.chat_history):
+    st.markdown(f"**🧑 You:** {user_input}")
+    st.markdown(f"**🤖 Bot:** {bot_response}")
